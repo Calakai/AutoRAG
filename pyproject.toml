@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autorag"
+version = "0.1.0"
+description = "Convert PDFs into RAG-ready chunked output folders"
+requires-python = ">=3.10"
+dependencies = [
+    "pymupdf>=1.25",
+    "customtkinter>=5.2,<6",
+    "tomli-w>=1.0,<2",
+    "tomli>=2.0; python_version < '3.11'",
+    "docling-core[chunking]>=2.70,<3",
+    "python-docx>=1.1",
+    "rapidocr-onnxruntime>=1.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+autorag = "autorag.cli:main"
+
+[project.gui-scripts]
+autorag-gui = "autorag.cli:_launch_gui"
+
+[tool.setuptools.packages.find]
+where = ["src"]

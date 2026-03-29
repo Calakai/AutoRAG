@@ -1,0 +1,22 @@
+[general]
+output_dir = "./output"
+log_level = "INFO"
+
+[parsing]
+ocr_enabled = false
+ocr_engine = "easyocr"
+max_pages = 0
+extract_tables = false
+extract_images = false
+
+[chunking]
+strategy = "hybrid"
+max_tokens = 512
+overlap_tokens = 64
+include_metadata = true
+
+[metadata]
+include_page_numbers = true
+include_section_titles = true
+include_element_types = true
+custom_tags = []

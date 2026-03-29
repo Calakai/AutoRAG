@@ -1,0 +1,5 @@
+This is a plain text test file.
+
+It has multiple paragraphs.
+
+Each should become a chunk.
