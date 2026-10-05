@@ -22,6 +22,7 @@ pip install -e .           # core only: extract + chunk to folders, no models
 | `embed` | fastembed for local embeddings (`BAAI/bge-small-en-v1.5`, downloaded once) |
 | `ocr` | OCR for scanned pages: Apple Vision on macOS, RapidOCR elsewhere |
 | `mcp` | The MCP server |
+| `postgres` | Postgres as a SQL source and pgvector export target (pg8000) |
 | `gui` | The original desktop app (CustomTkinter) |
 
 ## Knowledge base
@@ -53,6 +54,42 @@ autorag rm "router-guide.pdf" -c manuals
 | `aegis` | Aegis's exact recipe: `nomic-embed-text`, its prefixes, 512 dims. Vectors are interchangeable with Aegis's pgvector columns |
 
 Set a default with `AUTORAG_EMBEDDER`.
+
+## SQL tables as a source
+
+Index rows from SQLite or Postgres. Each row becomes one document (`sql:<label>/<id>`).
+
+```bash
+export CRM_DSN="postgresql://cal:…@localhost:5432/crm"        # keeps the password out of history
+autorag index-sql --dsn env:CRM_DSN --label crm \
+  --query "SELECT id, subject, body, status FROM tickets" \
+  --id-column id --title-column subject --text-columns body --meta-columns status \
+  -c support --sync
+```
+
+- **Read-only:** SQLite opens in `mode=ro`, and Postgres sessions run `READ ONLY`, so the query can't change anything.
+- **Incremental:** unchanged rows are skipped on re-runs. `--sync` removes documents whose rows are gone, and only touches documents from that `--label`.
+- **Postgres** needs the `[postgres]` extra (pg8000, which is BSD licensed).
+
+## Export to other databases
+
+The local library stays the source of truth. An export **replaces** that collection's rows in the target, so re-run it to refresh.
+
+```bash
+# Any Postgres with pgvector (local, Docker, Supabase)
+autorag export -c support --to env:AUTORAG_EXPORT_DSN            # table autorag_chunks + HNSW index
+
+# Aegis's player library
+autorag index ~/dnd/books -r -c dnd --embedder aegis
+AEGIS_SERVICE_KEY=<from `npm run db:jwt`> autorag export -c dnd --to aegis
+```
+
+| Target | What it writes |
+|---|---|
+| `postgres://…` | `autorag_chunks`, created if missing and owned by AutoRAG, with one row per chunk. One transaction, so the target never holds half an export. A table is fixed to one vector size; use `--table` for a different embedder |
+| `aegis` | `user_library_chunks` + `user_library_books` through Aegis's PostgREST (`AEGIS_URL`, default `http://localhost:3001`). Same book names, reserved-name check, category guess and replace-by-book behaviour as Aegis's upload route. The collection must be built with `--embedder aegis` |
+
+> **Aegis vectors:** same model, prefix and 512 dimensions as Aegis, so `match_user_library` finds them. AutoRAG embeds each chunk with its file and section names in front, while Aegis embeds the bare text, so vectors carry slightly more context than Aegis's own.
 
 ## MCP server (Claude Code, Claude Desktop, any MCP client)
 

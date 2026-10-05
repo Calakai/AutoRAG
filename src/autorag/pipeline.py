@@ -22,6 +22,7 @@ __all__ = [
     "PipelineResult",
     "ProcessingCancelledError",
     "SUPPORTED_EXTENSIONS",
+    "chunk_text",
     "compute_sha256",
     "process_document",
 ]
@@ -152,6 +153,42 @@ def process_document(
         scanned_pages=extraction.scanned_pages,
         ocr_pages_skipped=extraction.ocr_pages_skipped,
     )
+
+
+def chunk_text(text: str, stem: str, source_name: str, config: ProcessingConfig) -> list[ChunkResult]:
+    """Chunk text that didn't come from a file (database rows, API content).
+
+    Same structure-aware chunker and metadata as process_document, with no pages.
+    """
+    blocks = parse_blocks([text], paged=False)
+    raw = chunk_blocks(
+        blocks,
+        max_tokens=config.chunking.max_tokens,
+        overlap_tokens=config.chunking.overlap_tokens,
+        strategy=config.chunking.strategy,
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    pad = max(3, len(str(len(raw))))
+    return [
+        ChunkResult(
+            chunk_id=f"{stem}_chunk_{i + 1:0{pad}d}",
+            text=chunk.text,
+            token_count=chunk.token_count,
+            metadata={
+                "source_file": source_name,
+                "page_start": None,
+                "page_end": None,
+                "section_title": chunk.heading_path[-1] if chunk.heading_path else "",
+                "heading_path": chunk.heading_path,
+                "element_types": chunk.element_types,
+                "chunk_index": i + 1,
+                "total_chunks": len(raw),
+                "custom_tags": list(config.metadata.custom_tags),
+                "created_at": now,
+            },
+        )
+        for i, chunk in enumerate(raw)
+    ]
 
 
 # Backward-compatible alias

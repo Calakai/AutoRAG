@@ -70,3 +70,47 @@ def test_info_without_pymupdf(tmp_path, capsys):
 def test_process_keeps_verbose_flag(tmp_path, docs):
     args = cli.build_parser().parse_args(["process", str(docs), "-v"])
     assert args.verbose is True
+
+
+def test_index_sql_from_env_dsn_and_sync(tmp_path, monkeypatch, capsys):
+    import sqlite3
+
+    src = tmp_path / "crm.db"
+    conn = sqlite3.connect(src)
+    conn.executescript(
+        "CREATE TABLE notes (id INTEGER, title TEXT, body TEXT);"
+        "INSERT INTO notes VALUES (1, 'Call Dana', 'Dana wants the router quote by Friday.');"
+        "INSERT INTO notes VALUES (2, 'Invoice', 'Invoice 42 is overdue.');"
+    )
+    conn.commit()
+    monkeypatch.setenv("CRM_DSN", str(src))
+    db = str(tmp_path / "kb.db")
+    args = ["index-sql", "--dsn", "env:CRM_DSN", "--query", "SELECT * FROM notes", "--label", "crm",
+            "--id-column", "id", "--text-columns", "body", "--title-column", "title",
+            "-c", "crm", "--sync", "--json", "-q", "--db", db]
+    cli.main(args)
+    assert {json.loads(l)["status"] for l in capsys.readouterr().out.splitlines()} == {"added"}
+    conn.execute("DELETE FROM notes WHERE id = 2")
+    conn.commit()
+    cli.main(args)
+    statuses = {json.loads(l)["path"]: json.loads(l)["status"] for l in capsys.readouterr().out.splitlines()}
+    assert statuses == {"sql:crm/1": "unchanged", "sql:crm/2": "removed"}
+
+
+def test_export_errors_exit_cleanly(tmp_path, docs, monkeypatch, capsys):
+    monkeypatch.delenv("AUTORAG_EXPORT_DSN", raising=False)
+    db = str(tmp_path / "kb.db")
+    cli.main(["index", str(docs), "-c", "net", "--db", db, "-q"])
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["export", "-c", "net", "--to", "aegis", "--db", db])
+    assert exc.value.code == 2 and "re-index it with --embedder aegis" in capsys.readouterr().err
+    # An unset env:VAR must fail, never fall back to $AUTORAG_EXPORT_DSN
+    monkeypatch.setenv("AUTORAG_EXPORT_DSN", "postgresql://prod.example/db")
+    with pytest.raises(SystemExit):
+        cli.main(["export", "-c", "net", "--to", "env:NOPE", "--db", db])
+    assert "NOPE is not set" in capsys.readouterr().err
+    for bad in ("Aegis", "./backup.db"):
+        with pytest.raises(SystemExit):
+            cli.main(["export", "-c", "net", "--to", bad, "--db", db])
+        assert "--to must be" in capsys.readouterr().err
