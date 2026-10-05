@@ -1,0 +1,14 @@
+{
+  "name": "calakai",
+  "owner": {
+    "name": "Caleb Monk"
+  },
+  "description": "Caleb Monk's Claude Code plugins.",
+  "plugins": [
+    {
+      "name": "autorag",
+      "source": "./plugin",
+      "description": "Search your local document library from Claude Code, with cited answers."
+    }
+  ]
+}

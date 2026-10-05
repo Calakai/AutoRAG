@@ -81,6 +81,26 @@ Claude Desktop (`claude_desktop_config.json`):
 - **Allowed folders:** set `AUTORAG_ALLOWED_ROOTS` (folders separated by `:`, or `;` on Windows) to limit what the server may ingest.
 - **What gets read:** ingestion only reads supported document formats and skips hidden files.
 
+## Claude Code plugin
+
+Adds cited document answers to every Claude Code session.
+
+```bash
+pip install "autorag[all] @ git+https://github.com/Calakai/AutoRAG"   # once; puts `autorag` on PATH
+```
+```
+/plugin marketplace add calakai/autorag
+/plugin install autorag@calakai
+```
+
+| Piece | Use |
+|---|---|
+| `/autorag:ask-docs <question>` | Runs the **librarian** agent and returns a cited answer. Claude can also use it on its own when a question looks like it is about your documents |
+| `/autorag:ingest <paths> [into <collection>]` | Adds documents. Only runs when you type it |
+| `librarian` agent | Read-only: search, read and list tools only. It cannot add or remove documents |
+
+The plugin runs `autorag mcp`, so the `autorag` command must be on the `PATH` Claude Code starts with.
+
 ## Chunk folders (the original AutoRAG output)
 
 ```bash
