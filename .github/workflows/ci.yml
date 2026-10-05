@@ -37,3 +37,17 @@ jobs:
           ! pip list 2>/dev/null | grep -i -E '^(pymupdf|fastembed|mcp|customtkinter|transformers|docling-core) '
       - name: Chunk a document with no extras
         run: autorag process tests/fixtures/test.md -o /tmp/out -q --json
+
+  plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Validate plugin and marketplace
+        run: |
+          claude plugin validate plugin --strict
+          claude plugin validate . --strict

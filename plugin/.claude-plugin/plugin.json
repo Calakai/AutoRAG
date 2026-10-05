@@ -1,0 +1,8 @@
+{
+  "name": "autorag",
+  "version": "0.2.0",
+  "description": "Search your local AutoRAG document library from Claude Code: cited answers via a read-only librarian agent, and /autorag:ingest to add documents.",
+  "author": { "name": "Caleb Monk" },
+  "homepage": "https://github.com/Calakai/AutoRAG",
+  "license": "MIT"
+}

@@ -45,6 +45,12 @@ the shared embedding recipes below.
   words×1.3), conservative for BERT-style tokenizers. The default embedder
   (`bge-small-en-v1.5`) truncates input at 512 tokens.
 
+- 🔴 **Plugin skills must name plugin agents by namespace** (`agent: autorag:librarian`). A
+  bare `agent: librarian` is not an error: the skill forks with the *full* tool set, so the
+  librarian could ingest and run Bash. Verified in a live session on 2026-10-05.
+  `tests/test_plugin.py` guards it, and also checks that the librarian's tool list stays
+  read-only.
+
 ## Conventions
 
 - `pip install -e ".[dev]"` then `pytest -q`. Every new module ships tests, and a PR never
@@ -59,8 +65,8 @@ the shared embedding recipes below.
 
 1. ✅ Foundation: MIT-clean extraction, offline chunker, local embeddings, SQLite hybrid
    search, MCP server.
-2. Claude Code plugin: `/ingest` and `/ask-docs` skills plus a read-only librarian agent,
-   built to the Notion "Agent & Skill Authoring Reference", with a registry row added.
+2. ✅ Claude Code plugin (`plugin/`): `/autorag:ingest`, `/autorag:ask-docs` and a read-only
+   librarian agent. The marketplace lives at the repo root.
 3. More sources and sinks: SQL tables as a source; Postgres/pgvector as a sink (Aegis's
    local stack, Supabase / Knowledge Sync); an Aegis `user_library_chunks` adapter.
 4. Upstream app PRs: index imported documents in MonkChat; add an HNSW index and keyword
