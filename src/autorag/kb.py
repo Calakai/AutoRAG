@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
@@ -22,7 +23,7 @@ from typing import Callable, Iterable
 from autorag.config import ProcessingConfig
 from autorag.embed import Embedder, EmbeddingUnavailableError, resolve_embedder
 from autorag.extract import SUPPORTED_EXTENSIONS
-from autorag.pipeline import compute_sha256, process_document
+from autorag.pipeline import ChunkResult, chunk_text, compute_sha256, process_document
 from autorag.store import (
     ChunkRecord,
     CollectionInfo,
@@ -74,11 +75,28 @@ def collect_files(paths: Iterable[str | Path], recursive: bool = False) -> list[
 @dataclass
 class IngestOutcome:
     path: str
-    status: str  # added | updated | retagged | unchanged | failed
+    status: str  # added | updated | retagged | unchanged | removed | failed
     chunks: int = 0
     pages: int = 0
     ocr_pages_skipped: int = 0
     error: str = ""
+
+
+@dataclass
+class TextItem:
+    """A document that is text already — a database row, an API record.
+
+    `source_path` is its stable identity (e.g. ``sql:notes/42``); it is what
+    change detection and --sync removal key on, so it must not change between runs.
+    """
+
+    source_path: str
+    source_name: str
+    text: str
+
+
+def text_hash(text: str) -> str:
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def document_key(collection: str, source_path: str, stem: str) -> str:
@@ -129,13 +147,7 @@ class KnowledgeBase:
         """Add or refresh documents. Unchanged files (same content hash) are skipped
         unless `force`; changed files replace their previous chunks atomically."""
         files = collect_files(paths, recursive=recursive)
-        existing = self.store.get_collection(collection)
-        if existing and existing.embedder != self.embedder.name:
-            # Fail before any extraction, OCR or embedding is spent on the batch
-            raise EmbedderMismatchError(
-                f"Collection '{collection}' was built with {existing.embedder}; "
-                f"the active embedder is {self.embedder.name}."
-            )
+        self._check_embedder(collection)
         outcomes: list[IngestOutcome] = []
         for index, path in enumerate(files):
             if on_file:
@@ -157,48 +169,127 @@ class KnowledgeBase:
                 return IngestOutcome(source_path, "unchanged", existing.total_chunks, existing.total_pages)
 
             result = process_document(path, self.config, source_hash=source_hash)
-            key = document_key(collection, source_path, path.stem)
-            records = [
-                ChunkRecord(
-                    chunk_id=f"{key}_chunk_{c.metadata['chunk_index']:03d}",
-                    text=c.text,
-                    token_count=c.token_count,
-                    page_start=c.metadata["page_start"],
-                    page_end=c.metadata["page_end"],
-                    section_title=c.metadata["section_title"],
-                    heading_path=c.metadata["heading_path"],
-                )
-                for c in result.chunks
-            ]
-            vectors = self.embedder.embed_documents(
-                [embedding_text(r.text, r.heading_path, path.name) for r in records]
-            )
-            dim = int(vectors.shape[1]) if len(records) else self._probe_dim()
-            self.store.ensure_collection(collection, self.embedder.name, dim)
-            self.store.replace_document(
+            return self._store(
                 collection,
                 source_path,
                 path.name,
+                path.stem,
                 source_hash,
-                records,
-                vectors.reshape(len(records), dim) if len(records) else vectors.reshape(0, dim),
+                result.chunks,
+                tags,
+                existing,
                 total_pages=result.total_pages,
                 ocr_used=result.ocr_used,
                 ocr_pages_skipped=result.ocr_pages_skipped,
-                tags=tags or (existing.tags if existing else []),
-            )
-            return IngestOutcome(
-                source_path,
-                "updated" if existing else "added",
-                len(records),
-                result.total_pages,
-                result.ocr_pages_skipped,
             )
         except (EmbeddingUnavailableError, EmbedderMismatchError):
             raise  # affects every file — stop instead of failing them one by one
         except Exception as exc:
             logger.warning("Failed to ingest %s: %s", path, exc)
             return IngestOutcome(source_path, "failed", error=str(exc))
+
+    def ingest_texts(
+        self,
+        items: Iterable[TextItem],
+        collection: str = DEFAULT_COLLECTION,
+        tags: Iterable[str] = (),
+        force: bool = False,
+        sync_prefix: str | None = None,
+    ) -> list[IngestOutcome]:
+        """Add or refresh text documents (see TextItem). With `sync_prefix`, documents
+        in the collection under that prefix that are no longer in `items` are removed
+        — how deleted database rows leave the library."""
+        self._check_embedder(collection)
+        tags = list(tags)
+        outcomes: list[IngestOutcome] = []
+        seen: set[str] = set()
+        for item in items:
+            if sync_prefix and not item.source_path.startswith(sync_prefix):
+                raise ValueError(f"{item.source_path!r} is outside the sync prefix {sync_prefix!r}")
+            seen.add(item.source_path)
+            outcomes.append(self._ingest_text(item, collection, tags, force))
+        if sync_prefix:
+            for doc in self.store.documents(collection):
+                if doc.source_path.startswith(sync_prefix) and doc.source_path not in seen:
+                    self.store.delete_document(collection, doc.source_path)
+                    outcomes.append(IngestOutcome(doc.source_path, "removed", doc.total_chunks))
+        return outcomes
+
+    def _ingest_text(self, item: TextItem, collection: str, tags: list[str], force: bool) -> IngestOutcome:
+        try:
+            source_hash = text_hash(item.text)
+            existing = self.store.get_document(collection, item.source_path)
+            if existing and existing.source_hash == source_hash and not force:
+                if tags and sorted(existing.tags) != sorted(tags):
+                    self.store.update_tags(existing.id, tags)
+                    return IngestOutcome(item.source_path, "retagged", existing.total_chunks)
+                return IngestOutcome(item.source_path, "unchanged", existing.total_chunks)
+            stem = re.sub(r"[^\w-]+", "-", item.source_name).strip("-")[:40] or "item"
+            chunks = chunk_text(item.text, stem, item.source_name, self.config)
+            return self._store(collection, item.source_path, item.source_name, stem, source_hash, chunks, tags, existing)
+        except (EmbeddingUnavailableError, EmbedderMismatchError):
+            raise
+        except Exception as exc:
+            logger.warning("Failed to ingest %s: %s", item.source_path, exc)
+            return IngestOutcome(item.source_path, "failed", error=str(exc))
+
+    def _check_embedder(self, collection: str) -> None:
+        existing = self.store.get_collection(collection)
+        if existing and existing.embedder != self.embedder.name:
+            # Fail before any extraction, OCR or embedding is spent on the batch
+            raise EmbedderMismatchError(
+                f"Collection '{collection}' was built with {existing.embedder}; "
+                f"the active embedder is {self.embedder.name}."
+            )
+
+    def _store(
+        self,
+        collection: str,
+        source_path: str,
+        source_name: str,
+        stem: str,
+        source_hash: str,
+        chunks: list[ChunkResult],
+        tags: list[str],
+        existing: DocumentInfo | None,
+        total_pages: int = 0,
+        ocr_used: bool = False,
+        ocr_pages_skipped: int = 0,
+    ) -> IngestOutcome:
+        """Embed chunks and atomically replace the document's previous version."""
+        key = document_key(collection, source_path, stem)
+        records = [
+            ChunkRecord(
+                chunk_id=f"{key}_chunk_{c.metadata['chunk_index']:03d}",
+                text=c.text,
+                token_count=c.token_count,
+                page_start=c.metadata["page_start"],
+                page_end=c.metadata["page_end"],
+                section_title=c.metadata["section_title"],
+                heading_path=c.metadata["heading_path"],
+            )
+            for c in chunks
+        ]
+        vectors = self.embedder.embed_documents(
+            [embedding_text(r.text, r.heading_path, source_name) for r in records]
+        )
+        dim = int(vectors.shape[1]) if len(records) else self._probe_dim()
+        self.store.ensure_collection(collection, self.embedder.name, dim)
+        self.store.replace_document(
+            collection,
+            source_path,
+            source_name,
+            source_hash,
+            records,
+            vectors.reshape(len(records), dim) if len(records) else vectors.reshape(0, dim),
+            total_pages=total_pages,
+            ocr_used=ocr_used,
+            ocr_pages_skipped=ocr_pages_skipped,
+            tags=tags or (existing.tags if existing else []),
+        )
+        return IngestOutcome(
+            source_path, "updated" if existing else "added", len(records), total_pages, ocr_pages_skipped
+        )
 
     def _probe_dim(self) -> int:
         return int(self.embedder.embed_query("dimension probe").shape[-1])

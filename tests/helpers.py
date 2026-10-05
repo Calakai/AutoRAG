@@ -138,3 +138,10 @@ LOREM = (
     "Each table entry maps a destination prefix to a next hop and an interface. "
     "When several entries match, the longest prefix wins and the packet follows it. "
 )
+
+
+def pg_admin_dsn() -> str | None:
+    """Postgres for integration tests (CI service container or a local cluster)."""
+    import os
+
+    return os.environ.get("AUTORAG_TEST_PG_DSN")

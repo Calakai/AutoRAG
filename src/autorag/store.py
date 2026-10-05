@@ -60,6 +60,12 @@ CREATE TABLE IF NOT EXISTS chunks (
     embedding      BLOB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS chunks_document ON chunks(document_id, seq);
+CREATE TABLE IF NOT EXISTS exports (
+    target      TEXT NOT NULL,
+    collection  TEXT NOT NULL,
+    item        TEXT NOT NULL,
+    PRIMARY KEY (target, collection, item)
+);
 CREATE INDEX IF NOT EXISTS chunks_chunk_id ON chunks(chunk_id);
 """
 
@@ -381,6 +387,51 @@ class SQLiteStore:
             (row["document_id"], row["seq"] - neighbors, row["seq"] + neighbors),
         ).fetchall()
         return [self._hit(r, score=0.0) for r in rows]
+
+    def exported_items(self, target: str, collection: str | None = None) -> set[str]:
+        """Names AutoRAG wrote to an export target (all collections when None)."""
+        if collection is None:
+            rows = self._conn.execute("SELECT item FROM exports WHERE target = ?", (target,))
+        else:
+            rows = self._conn.execute(
+                "SELECT item FROM exports WHERE target = ? AND collection = ?", (target, collection)
+            )
+        return {r["item"] for r in rows}
+
+    def set_exported_items(self, target: str, collection: str, items: set[str]) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM exports WHERE target = ? AND collection = ?", (target, collection))
+            self._conn.executemany(
+                "INSERT INTO exports(target, collection, item) VALUES (?, ?, ?)",
+                [(target, collection, item) for item in sorted(items)],
+            )
+
+    def iter_chunks(self, collection: str):
+        """Every chunk of a collection with its document and vector, in document order
+        — the export path."""
+        cur = self._conn.execute(
+            """
+            SELECT c.chunk_id, c.text, c.token_count, c.page_start, c.page_end, c.section_title,
+                   c.heading_path, c.embedding, d.source_name, d.source_path, d.tags
+            FROM chunks c JOIN documents d ON d.id = c.document_id
+            WHERE d.collection = ? ORDER BY d.source_path, c.seq
+            """,
+            (collection,),
+        )
+        for row in cur:
+            yield {
+                "chunk_id": row["chunk_id"],
+                "text": row["text"],
+                "token_count": row["token_count"],
+                "page_start": row["page_start"],
+                "page_end": row["page_end"],
+                "section_title": row["section_title"],
+                "heading_path": json.loads(row["heading_path"]),
+                "embedding": np.frombuffer(row["embedding"], dtype=np.float32),
+                "source_name": row["source_name"],
+                "source_path": row["source_path"],
+                "tags": json.loads(row["tags"]),
+            }
 
     # --- search ----------------------------------------------------------------------
 

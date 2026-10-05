@@ -12,6 +12,16 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      AUTORAG_TEST_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,7 +44,7 @@ jobs:
         run: pip install .
       - name: No optional or copyleft dependencies
         run: |
-          ! pip list 2>/dev/null | grep -i -E '^(pymupdf|fastembed|mcp|customtkinter|transformers|docling-core) '
+          ! pip list 2>/dev/null | grep -i -E '^(pymupdf|fastembed|mcp|customtkinter|transformers|docling-core|pg8000|psycopg|psycopg2|psycopg-binary) '
       - name: Chunk a document with no extras
         run: autorag process tests/fixtures/test.md -o /tmp/out -q --json
 

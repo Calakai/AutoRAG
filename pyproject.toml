@@ -33,11 +33,14 @@ ocr = [
 # 1.14+ (earlier FastMCP releases mis-handle postponed annotations); 2.x MCPServer too.
 mcp = ["mcp>=1.14"]
 gui = ["customtkinter>=5.2,<6"]
-all = ["autorag[embed,ocr,mcp]"]
+# Postgres source and pgvector export. pg8000 is BSD; psycopg is LGPL and ruled out.
+postgres = ["pg8000>=1.30"]
+all = ["autorag[embed,ocr,mcp,postgres]"]
 dev = [
     "pytest>=8.0",
     "mcp>=1.14",
     "pillow>=10",
+    "pg8000>=1.30",
 ]
 
 [project.scripts]

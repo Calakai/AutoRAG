@@ -51,6 +51,15 @@ the shared embedding recipes below.
   `tests/test_plugin.py` guards it, and also checks that the librarian's tool list stays
   read-only.
 
+- **Postgres goes through pg8000 (BSD).** psycopg 2 and 3 are LGPL, so they're ruled out
+  by the no-copyleft rule.
+- **`export_aegis` mirrors `aegis/src/app/api/uploads/route.ts`:** book naming
+  (`deriveTitleFromName`), the reserved-name regex, the category hints, delete-then-insert
+  per book, and the `user_library_books` upsert. If that route changes, change this too.
+  `tests/test_export.py` runs Aegis's real `match_user_library` against exported rows.
+- **SQL sources are read-only, and DSNs are never stored.** Row identity is
+  `sql:<label>/<id>`. Only `redact_dsn` output may be printed.
+
 ## Conventions
 
 - `pip install -e ".[dev]"` then `pytest -q`. Every new module ships tests, and a PR never
@@ -67,7 +76,7 @@ the shared embedding recipes below.
    search, MCP server.
 2. ✅ Claude Code plugin (`plugin/`): `/autorag:ingest`, `/autorag:ask-docs` and a read-only
    librarian agent. The marketplace lives at the repo root.
-3. More sources and sinks: SQL tables as a source; Postgres/pgvector as a sink (Aegis's
-   local stack, Supabase / Knowledge Sync); an Aegis `user_library_chunks` adapter.
+3. ✅ SQL tables as a source (`index-sql`); exports to Postgres/pgvector (`autorag_chunks`)
+   and to Aegis's player library (`export --to aegis`).
 4. Upstream app PRs: index imported documents in MonkChat; add an HNSW index and keyword
    search to Aegis.

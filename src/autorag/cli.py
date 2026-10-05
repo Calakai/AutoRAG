@@ -202,6 +202,90 @@ def cmd_rm(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def _resolve_dsn(value: str | None, env_default: str) -> str:
+    """A DSN from the flag, `env:VAR`, or the default env var — so passwords can
+    stay out of shell history."""
+    import os
+
+    if value and value.startswith("env:"):
+        name = value[4:]
+        value = os.environ.get(name, "")
+        if not value:  # never fall back to another database than the one named
+            raise ValueError(f"Environment variable {name} is not set")
+        return value
+    value = value or os.environ.get(env_default, "")
+    if not value:
+        raise ValueError(f"No connection string: pass one, or set {env_default}")
+    return value
+
+
+def _columns(value: str | None) -> list[str]:
+    return [c.strip() for c in (value or "").split(",") if c.strip()]
+
+
+def cmd_index_sql(args: argparse.Namespace) -> None:
+    from autorag.sql_source import RowMapping, fetch_rows, redact_dsn, rows_to_items
+
+    dsn = _resolve_dsn(args.dsn, "AUTORAG_SQL_DSN")
+    mapping = RowMapping(
+        label=args.label,
+        id_column=args.id_column,
+        text_columns=_columns(args.text_columns),
+        title_column=args.title_column,
+        meta_columns=tuple(_columns(args.meta_columns)),
+    )
+    rows = fetch_rows(dsn, args.query)
+    items = rows_to_items(rows, mapping)
+    if not args.quiet:
+        print(f"{len(rows)} rows from {redact_dsn(dsn)} -> {len(items)} documents", file=sys.stderr)
+    tags = _columns(args.tags)
+    with _kb(args) as kb:
+        outcomes = kb.ingest_texts(
+            items,
+            collection=args.collection,
+            tags=tags,
+            force=args.force,
+            sync_prefix=mapping.prefix if args.sync else None,
+        )
+    if args.json:
+        for o in outcomes:
+            print(json.dumps(asdict(o)))
+    counts: dict[str, int] = {}
+    for o in outcomes:
+        counts[o.status] = counts.get(o.status, 0) + 1
+        if o.status == "failed":
+            print(f"  ERROR {o.path}: {o.error}", file=sys.stderr)
+    summary = ", ".join(f"{n} {status}" for status, n in sorted(counts.items())) or "nothing to index"
+    print(f"Collection '{args.collection}': {summary}", file=sys.stderr)
+    if counts.get("failed"):
+        sys.exit(1)
+
+
+def cmd_export(args: argparse.Namespace) -> None:
+    from autorag.export import export_aegis, export_pgvector
+
+    with _kb(args) as kb:
+        if args.to == "aegis":
+            report = export_aegis(kb, args.collection, url=args.aegis_url, player_id=args.player_id)
+        else:
+            from autorag.sql_source import is_postgres
+
+            dsn = _resolve_dsn(args.to, "AUTORAG_EXPORT_DSN")
+            if not is_postgres(dsn):
+                raise ValueError("--to must be 'aegis', a postgres:// URL, or env:VAR holding one")
+            report = export_pgvector(kb, args.collection, dsn, table=args.table)
+    if args.json:
+        print(json.dumps(asdict(report)))
+    print(
+        f"Exported '{report.collection}' to {report.target}: {report.documents} documents, {report.chunks} chunks",
+        file=sys.stderr,
+    )
+    for note in report.skipped:
+        print(f"  skipped {note}", file=sys.stderr)
+    for name in report.removed:
+        print(f"  removed '{name}' (no longer in the collection)", file=sys.stderr)
+
+
 def cmd_mcp(args: argparse.Namespace) -> None:
     from autorag.mcp_server import run
 
@@ -280,6 +364,33 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-c", "--collection", default="default")
     _add_kb_options(p)
     p.set_defaults(func=cmd_rm)
+
+    p = sub.add_parser("index-sql", help="Index rows from a SQLite or Postgres query")
+    p.add_argument("--dsn", help="SQLite path, sqlite:///path, postgres://… or env:VAR (default: $AUTORAG_SQL_DSN)")
+    p.add_argument("--query", required=True, help="Read-only SELECT returning the rows to index")
+    p.add_argument("--label", required=True, help="Stable name for this source; row ids become sql:<label>/<id>")
+    p.add_argument("--id-column", required=True, help="Column that uniquely identifies a row")
+    p.add_argument("--text-columns", required=True, help="Comma-separated columns holding the text")
+    p.add_argument("--title-column", help="Column used as the document title")
+    p.add_argument("--meta-columns", help="Comma-separated columns added as 'name: value' lines")
+    p.add_argument("-c", "--collection", default="default")
+    p.add_argument("--tags", help="Comma-separated tags")
+    p.add_argument("--sync", action="store_true", help="Remove this source's documents whose rows are gone")
+    p.add_argument("--force", action="store_true", help="Re-index rows even if unchanged")
+    p.add_argument("--json", action="store_true", help="One JSON line per row on stdout")
+    p.add_argument("-q", "--quiet", action="store_true")
+    _add_kb_options(p)
+    p.set_defaults(func=cmd_index_sql)
+
+    p = sub.add_parser("export", help="Push a collection to Postgres/pgvector or Aegis")
+    p.add_argument("-c", "--collection", required=True)
+    p.add_argument("--to", required=True, help="'aegis', a postgres:// DSN, or env:VAR")
+    p.add_argument("--table", default="autorag_chunks", help="pgvector table (default: autorag_chunks)")
+    p.add_argument("--aegis-url", help="Aegis PostgREST URL (default: $AEGIS_URL or http://localhost:3001)")
+    p.add_argument("--player-id", help="Aegis player UUID (default: $AEGIS_PLAYER_ID or Aegis's local player)")
+    p.add_argument("--json", action="store_true")
+    _add_kb_options(p)
+    p.set_defaults(func=cmd_export)
 
     p = sub.add_parser("mcp", help="Run the MCP server on stdio (needs the [mcp] extra)")
     _add_kb_options(p)
