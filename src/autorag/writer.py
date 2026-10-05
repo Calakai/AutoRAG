@@ -78,8 +78,10 @@ def write_output(result: PipelineResult, output_dir: Path) -> Path:
         "max_tokens": result.config.chunking.max_tokens,
         "overlap_tokens": result.config.chunking.overlap_tokens,
         "ocr_used": result.ocr_used,
+        "scanned_pages": result.scanned_pages,
+        "ocr_pages_skipped": result.ocr_pages_skipped,
         "processing_time_seconds": result.processing_time_seconds,
-        "docling_version": result.docling_version,
+        "chunker": result.chunker,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     manifest_path = doc_dir / "manifest.json"

@@ -1,25 +1,43 @@
 [build-system]
-requires = ["setuptools>=75.0"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "autorag"
-version = "0.1.0"
-description = "Convert PDFs into RAG-ready chunked output folders"
+version = "0.2.0"
+description = "Local document ingestion and search: RAG-ready chunks, a SQLite knowledge base, and an MCP server"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
+# Core stays permissively licensed and model-free: PDF via pdfium, ebooks via the
+# stdlib, no PyMuPDF (AGPL) and no HuggingFace download to chunk a file.
 dependencies = [
-    "pymupdf>=1.25",
-    "customtkinter>=5.2,<6",
+    "pypdfium2>=4.30",
+    "python-docx>=1.1",
+    "numpy>=1.26",
     "tomli-w>=1.0,<2",
     "tomli>=2.0; python_version < '3.11'",
-    "docling-core[chunking]>=2.70,<3",
-    "python-docx>=1.1",
-    "rapidocr-onnxruntime>=1.2",
 ]
 
 [project.optional-dependencies]
+# Local embeddings (ONNX on CPU). Not needed when embedding through Ollama.
+embed = ["fastembed>=0.4"]
+# OCR for scanned pages: Apple Vision on macOS, RapidOCR elsewhere.
+ocr = [
+    "pillow>=10",
+    "ocrmac>=1.0; sys_platform == 'darwin'",
+    "rapidocr>=3.0; sys_platform != 'darwin'",
+    "onnxruntime>=1.18; sys_platform != 'darwin'",
+]
+# 1.14+ (earlier FastMCP releases mis-handle postponed annotations); 2.x MCPServer too.
+mcp = ["mcp>=1.14"]
+gui = ["customtkinter>=5.2,<6"]
+all = ["autorag[embed,ocr,mcp]"]
 dev = [
     "pytest>=8.0",
+    "mcp>=1.14",
+    "pillow>=10",
 ]
 
 [project.scripts]
@@ -30,3 +48,9 @@ autorag-gui = "autorag.cli:_launch_gui"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+autorag = ["defaults.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

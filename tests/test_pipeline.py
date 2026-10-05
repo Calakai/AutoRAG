@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from autorag.config import ProcessingConfig
-from autorag.pipeline import ChunkResult, PipelineResult
+from autorag.pipeline import ChunkResult, PipelineResult, process_document
 from autorag.writer import write_output
 
 
@@ -46,6 +46,54 @@ def test_config_load_defaults():
     assert cfg.general.log_level == "INFO"
 
 
+def test_config_ignores_unknown_keys(tmp_path: Path):
+    # Snapshots from v0.1 carry ocr_engine; loading them must not crash
+    old = tmp_path / "old.toml"
+    old.write_text('[parsing]\nocr_engine = "easyocr"\nmax_pages = 3\n[future]\nx = 1\n')
+    assert ProcessingConfig.from_toml(old).parsing.max_pages == 3
+
+
+# --- Pipeline Tests (offline: no tokenizer download) ---
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_process_markdown_fixture():
+    result = process_document(FIXTURES / "test.md", ProcessingConfig())
+    assert result.total_chunks >= 1
+    first = result.chunks[0]
+    assert first.chunk_id == "test_chunk_001"
+    assert first.metadata["heading_path"][0] == "Test Markdown"
+    assert first.metadata["page_start"] is None  # markdown has no pages
+    assert result.markdown.startswith("# Test Markdown")
+    assert result.source_hash.startswith("sha256:")
+    assert result.chunker.startswith("autorag-hybrid/")
+
+
+def test_process_pdf_reports_pages(tmp_path: Path):
+    from tests.helpers import LOREM, make_pdf
+
+    pdf = make_pdf(tmp_path / "guide.pdf", [f"Getting Started\n{LOREM}", f"Troubleshooting\n{LOREM}"])
+    config = ProcessingConfig()
+    config.chunking.strategy = "hierarchical"
+    result = process_document(pdf, config)
+    assert result.total_pages == 2
+    spans = [(c.metadata["page_start"], c.metadata["page_end"], c.metadata["section_title"]) for c in result.chunks]
+    assert spans == [(1, 1, "Getting Started"), (2, 2, "Troubleshooting")]
+
+    # hybrid merges the two small sections but keeps their headings in the text
+    merged = process_document(pdf, ProcessingConfig()).chunks
+    assert len(merged) == 1 and merged[0].metadata["page_end"] == 2
+    assert "Getting Started" in merged[0].text and "Troubleshooting" in merged[0].text
+
+
+def test_process_rejects_unsupported(tmp_path: Path):
+    bad = tmp_path / "book.mobi"
+    bad.write_bytes(b"x")
+    with pytest.raises(ValueError):
+        process_document(bad, ProcessingConfig())
+
+
 # --- Writer Tests ---
 
 
@@ -82,7 +130,7 @@ def _make_mock_result(num_chunks: int = 3) -> PipelineResult:
         ],
         processing_time_seconds=1.23,
         ocr_used=False,
-        docling_version="2.82.0",
+        chunker="autorag-hybrid/test",
         config=ProcessingConfig(),
     )
 
@@ -124,6 +172,8 @@ def test_writer_output_structure(tmp_path: Path):
     assert manifest["total_pages"] == 5
     assert manifest["source_hash"] == "sha256:abc123"
     assert manifest["chunking_strategy"] == "hybrid"
+    assert manifest["chunker"] == "autorag-hybrid/test"
+    assert "docling_version" not in manifest
 
     # Verify markdown
     md_content = (doc_dir / "markdown" / "full_document.md").read_text(encoding="utf-8")

@@ -15,6 +15,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from autorag.config import ChunkingConfig, GeneralConfig, MetadataConfig, ParsingConfig, ProcessingConfig
+from autorag.extract import page_count
 from autorag.pipeline import ProcessingCancelledError, process_document
 from autorag.writer import write_output
 
@@ -174,7 +175,7 @@ class AutoRAGApp(ctk.CTk):
         paths = filedialog.askopenfilenames(
             title="Select Documents",
             filetypes=[
-                ("Supported files", "*.pdf *.epub *.docx *.txt *.md *.mobi *.xps *.fb2 *.cbz"),
+                ("Supported files", "*.pdf *.epub *.docx *.txt *.md *.rst *.html *.htm *.xps *.oxps *.fb2"),
                 ("PDF", "*.pdf"),
                 ("EPUB", "*.epub"),
                 ("Word", "*.docx"),
@@ -198,12 +199,9 @@ class AutoRAGApp(ctk.CTk):
         """Quick size/page info for display."""
         try:
             ext = path.suffix.lower()
-            if ext in {".pdf", ".epub", ".xps", ".oxps", ".cbz", ".fb2", ".mobi"}:
-                import pymupdf
-                doc = pymupdf.open(str(path))
-                info = f" ({len(doc)} pages)"
-                doc.close()
-                return info
+            pages = page_count(path)
+            if pages is not None:
+                return f" ({pages} pages)"
             elif ext == ".docx":
                 return " (Word document)"
             elif ext in {".txt", ".md", ".text", ".rst"}:

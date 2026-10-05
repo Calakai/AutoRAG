@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib.resources
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 try:
@@ -12,6 +12,12 @@ except ImportError:
     import tomli as tomllib
 
 import tomli_w
+
+
+def _known(section_cls, values: dict):
+    """Build a config section, ignoring keys from older or newer versions."""
+    names = {f.name for f in fields(section_cls)}
+    return section_cls(**{k: v for k, v in values.items() if k in names})
 
 
 @dataclass
@@ -23,7 +29,6 @@ class GeneralConfig:
 @dataclass
 class ParsingConfig:
     ocr_enabled: bool = False
-    ocr_engine: str = "easyocr"
     max_pages: int = 0
     extract_tables: bool = False
     extract_images: bool = False
@@ -65,10 +70,10 @@ class ProcessingConfig:
         with open(path, "rb") as f:
             data = tomllib.load(f)
         return cls(
-            general=GeneralConfig(**data.get("general", {})),
-            parsing=ParsingConfig(**data.get("parsing", {})),
-            chunking=ChunkingConfig(**data.get("chunking", {})),
-            metadata=MetadataConfig(**data.get("metadata", {})),
+            general=_known(GeneralConfig, data.get("general", {})),
+            parsing=_known(ParsingConfig, data.get("parsing", {})),
+            chunking=_known(ChunkingConfig, data.get("chunking", {})),
+            metadata=_known(MetadataConfig, data.get("metadata", {})),
         )
 
     @classmethod

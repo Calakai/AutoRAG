@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Test
+        run: pytest -q
+
+  core-install:
+    # The core package must stay free of optional extras and model downloads.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install core only
+        run: pip install .
+      - name: No optional or copyleft dependencies
+        run: |
+          ! pip list 2>/dev/null | grep -i -E '^(pymupdf|fastembed|mcp|customtkinter|transformers|docling-core) '
+      - name: Chunk a document with no extras
+        run: autorag process tests/fixtures/test.md -o /tmp/out -q --json
