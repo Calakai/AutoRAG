@@ -4,7 +4,6 @@ log_level = "INFO"
 
 [parsing]
 ocr_enabled = false
-ocr_engine = "easyocr"
 max_pages = 0
 extract_tables = false
 extract_images = false
