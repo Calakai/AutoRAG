@@ -78,5 +78,12 @@ the shared embedding recipes below.
    librarian agent. The marketplace lives at the repo root.
 3. ✅ SQL tables as a source (`index-sql`); exports to Postgres/pgvector (`autorag_chunks`)
    and to Aegis's player library (`export --to aegis`).
-4. Upstream app PRs: index imported documents in MonkChat; add an HNSW index and keyword
-   search to Aegis.
+4. **Prove value before anything else** (Caleb, 2026-10-06). AutoRAG has not yet been
+   run on real models or a real corpus, and nobody has measured its retrieval quality.
+   Next step: index a real document set, ask about 10 real questions, and compare
+   `/autorag:ask-docs` against plain Claude Code reading the same files. If it doesn't
+   clearly win, archive it.
+   - 🔴 **No integration into MonkChat, Aegis or other apps until then.** Don't add it as a
+     dependency, and don't plan app work around it. The existing `export --to aegis` stays
+     as-is but isn't a roadmap commitment: it targets Aegis's Postgres layer, which the
+     Swift rebuild is replacing.
