@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from autorag import __version__
-from autorag.config import ProcessingConfig
 from autorag.pipeline import PipelineResult
 
 
